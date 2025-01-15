@@ -1,4 +1,5 @@
 import numpy as np
+import sympy as sym
 from abc import ABC, abstractmethod
 from SDE_schemes import SDE
 
@@ -25,13 +26,10 @@ class VasicekModel(Model):
         def a(x: float, t: float) -> float:
             return self.theta - self.alpha * x
         
-        def b(x: float, t: float) -> float:
+        def b(x: sym.Float, t: sym.Float) -> sym.Float:
             return self.sigma
         
-        def b_der(x: float, t: float) -> float:
-            return 0
-        
-        return SDE(a, b, b_der)
+        return SDE(a, b)
     
 class CIRModel(Model):
     
@@ -44,10 +42,23 @@ class CIRModel(Model):
         def a(x: float, t: float) -> float:
             return self.theta - self.alpha * x
         
-        def b(x: float, t: float) -> float:
-            return self.sigma * np.sqrt(x)
+        def b(x: sym.Float, t: sym.Float) -> sym.Float:
+            return self.sigma * sym.sqrt(x)
         
-        def b_der(x: float, t: float) -> float:
-            return self.sigma / (2 * np.sqrt(x))
+        return SDE(a, b)
+    
+
+class RBModel(Model):
+    
+    def __init__(self, theta: float, sigma: float):
+        self.theta = theta
+        self.sigma = sigma
+
+    def getSDE(self) -> SDE:
+        def a(x: float, t: float) -> float:
+            return self.theta * x
         
-        return SDE(a, b, b_der)
+        def b(x: sym.Float, t: sym.Float) -> sym.Float:
+            return self.sigma * x
+        
+        return SDE(a, b)

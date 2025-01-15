@@ -1,4 +1,6 @@
 import numpy as np
+import sympy as sym
+from sympy.abc import x, t
 from typing import Tuple
 from collections.abc import Callable
 
@@ -6,11 +8,13 @@ class SDE:
     """
     Class for defining a stochastic differential equation of the form dX_t = a(X_t, t)dt + b(X_t, t)dW_t.
     """
-    def __init__(self, a: Callable[[float, float], float], b: Callable[[float, float], float], b_der: Callable[[float, float], float]):
+    def __init__(self, a: Callable[[float, float], float], b: Callable[[sym.Float, sym.Float], sym.Float]):
         self.a = a
-        self.b = b
-        self.b_der = b_der
-
+        self.b = lambda x, t: float(b(x, t))
+        
+        b_der_sym = sym.diff(b(x, t), x)
+        self.b_der = sym.lambdify([x, t], b_der_sym)
+        
 
 def dW(dt: float):
     return np.random.normal(0, np.sqrt(dt))
