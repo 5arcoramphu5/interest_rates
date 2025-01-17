@@ -3,6 +3,7 @@ import sympy as sym
 from abc import ABC, abstractmethod
 from SDE_schemes import SDE
 from pandas import Series
+from sklearn.linear_model import LinearRegression
 
 class InterestRateModel(ABC):
     """
@@ -62,11 +63,14 @@ class VasicekModel(InterestRateModel):
     def calibrate(self, rates: Series, dt:float) -> None:
         N = len(rates)
         
-        Sx = sum(rates.iloc[0:(N-1)])
-        Sy = sum(rates.iloc[1:N])
-        Sxx = np.dot(rates.iloc[0:(N-1)], rates.iloc[0:(N-1)])
-        Sxy = np.dot(rates.iloc[0:(N-1)], rates.iloc[1:N])
-        Syy = np.dot(rates.iloc[1:N], rates.iloc[1:N])
+        np_rates = rates.to_numpy(dtype=np.float64)
+        x = np_rates[:-1]
+        y = np_rates[1:]
+        Sx = sum(x)
+        Sy = sum(y)
+        Sxx = np.dot(x, x)
+        Sxy = np.dot(x, y)
+        Syy = np.dot(y, y)
 
         theta = (Sy * Sxx - Sx * Sxy) / (N * (Sxx - Sxy) - (Sx**2 - Sx*Sy))
         kappa = -np.log((Sxy - theta * Sx - theta * Sy + N * theta**2) / (Sxx - 2*theta*Sx + N*theta**2)) / dt
@@ -78,7 +82,7 @@ class VasicekModel(InterestRateModel):
 
 class CIRModel(InterestRateModel):
     
-    def __init__(self, theta: float, alpha: float, sigma: float):
+    def __init__(self, theta: float = 0, alpha: float = 0, sigma: float = 0):
         self.alpha = alpha
         self.theta = theta
         self.sigma = sigma
@@ -93,4 +97,27 @@ class CIRModel(InterestRateModel):
         return SDE(a, b)
     
     def calibrate(self, rates: Series, dt:float) -> None:
-        pass
+
+        np_rates = rates.to_numpy(dtype=np.float64)
+        rs = np_rates[:-1]
+        rt = np_rates[1:]
+
+        rs_sqrt = np.sqrt(rs)
+        y = (rt - rs) / rs_sqrt
+        X = np.column_stack((dt / rs_sqrt, dt * rs_sqrt))
+
+        model = LinearRegression(fit_intercept=False)
+        model.fit(X, y)
+
+        prediction = model.predict(X)
+        residuals = y - prediction
+        beta1 = model.coef_[0]        
+        beta2 = model.coef_[1]
+
+        k0 = -beta2
+        theta0 = beta1/k0
+        sigma0 = np.std(residuals) / np.sqrt(dt)
+
+        self.theta = k0*theta0
+        self.alpha = k0
+        self.sigma = sigma0
