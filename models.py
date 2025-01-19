@@ -1,9 +1,11 @@
 import numpy as np
 import sympy as sym
 from abc import ABC, abstractmethod
-from SDE_schemes import SDE
+from SDE_schemes import SDE, EulerMaruyamaSolver
 from pandas import Series
 from sklearn.linear_model import LinearRegression
+from collections.abc import Callable
+from scipy.optimize import minimize
 
 class InterestRateModel(ABC):
     """
@@ -18,7 +20,7 @@ class InterestRateModel(ABC):
         pass
 
     @abstractmethod
-    def calibrate(self, rates: Series, dt: float) -> float:
+    def calibrate(self, rates: Series, dt: float, t0: float, tn: float) -> float:
         """
         Calibrates the model to market data. Returns r0.
         """
@@ -60,7 +62,7 @@ class VasicekModel(InterestRateModel):
         
         return SDE(a, b)
     
-    def calibrate(self, rates: Series, dt:float) -> None:
+    def calibrate(self, rates: Series, dt:float, t0: float, tn: float) -> None:
         N = len(rates)
         
         np_rates = rates.to_numpy(dtype=np.float64)
@@ -96,7 +98,7 @@ class CIRModel(InterestRateModel):
         
         return SDE(a, b)
     
-    def calibrate(self, rates: Series, dt:float) -> None:
+    def calibrate(self, rates: Series, dt:float, t0: float, tn: float) -> None:
 
         np_rates = rates.to_numpy(dtype=np.float64)
         rs = np_rates[:-1]
@@ -121,3 +123,50 @@ class CIRModel(InterestRateModel):
         self.theta = k0*theta0
         self.alpha = k0
         self.sigma = sigma0
+
+
+class HWModel(InterestRateModel):
+    
+    def __init__(self, theta: np.array = [], alpha: float = 0, sigma: np.array = [], timeToIndex: Callable[[float], int] = lambda f: int(f)):
+        self.theta = theta
+        self.alpha = alpha
+        self.sigma = sigma
+        self.timeToIndex = timeToIndex
+        self.N = len(self.theta)
+
+    def getSDE(self) -> SDE:
+        def a(x: float, t: float) -> float:
+            tInt = self.timeToIndex(t)
+            return self.theta[tInt] - self.alpha * x
+        
+        def b(x: sym.Float, t: sym.Float) -> sym.Float:
+            tInt = self.timeToIndex(t)
+            return self.sigma[tInt]
+        
+        return SDE(a, b, lambda x, t: 0)
+    
+    def calibrate(self, rates: Series, dt:float, t0: float, tn: float) -> None:
+
+        N = len(rates)
+        timeToIndex = lambda t: round((t - t0) / dt)
+        seed = 1
+
+        def calibration_obj(x, r0, np_rates, t0, tn, N):
+            theta, sigma, alpha = x[:N], x[N:2*N], x[2*N:][0]
+
+            model = HWModel(theta, alpha, sigma, timeToIndex)
+            t, model_result = EulerMaruyamaSolver.performSimulation(model.getSDE(), r0, t0, tn, N-1, seed)
+
+            return np.sum((model_result - np_rates[:-1])**2)
+
+        np_rates = rates.to_numpy(dtype=np.float64)
+        theta0 = np.ones(N) * 0.05
+        sigma0 = np.ones(N) * 0.01
+        alpha0 = 0.3
+        x0 = np.concatenate([theta0, sigma0, [alpha0] ])
+
+        result = minimize(calibration_obj, x0, args=(np_rates[0], np_rates, t0, tn, N), options={'maxiter': 100})
+        print("success:", result.success, ", message:", result.message)
+        self.theta = result.x[:N]
+        self.sigma = result.x[N:2*N]
+        self.alpha = result.x[2*N:][0]
